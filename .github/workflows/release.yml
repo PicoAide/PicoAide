@@ -19,9 +19,11 @@ jobs:
       - name: Prepare embed bundle
         run: |
           mkdir -p internal/rootfs/bundle
-          # 占位文件使 //go:embed 通过编译（build-server 会替换为真实文件）
+          # 占位 picoagent（build-server 会替换为实际的）
           touch internal/rootfs/bundle/picoagent
-          touch internal/rootfs/bundle/alpine-rootfs.tar.gz
+          # 下载真实 Alpine mini rootfs
+          curl -fsSL "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/x86_64/alpine-minirootfs-3.21.0-x86_64.tar.gz" \
+            -o internal/rootfs/bundle/alpine-rootfs.tar.gz
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
