@@ -9,23 +9,22 @@ import (
   "testing"
 )
 
-// ============================================================
-// WriteFileTool
-// ============================================================
+func init() {
+  sandboxWorkspace = os.TempDir()
+}
 
 func tempWorkspace(t *testing.T) string {
   t.Helper()
-  dir, err := os.MkdirTemp("", "tool-test-*")
+  dir, err := os.MkdirTemp(sandboxWorkspace, "tool-test-*")
   if err != nil {
     t.Fatal(err)
   }
-  // 在 /workspace 下创建软链，使测试文件可通过 safePath 验证
-  os.MkdirAll("/workspace", 0755)
-  linkPath := filepath.Join("/workspace", filepath.Base(dir))
-  os.Symlink(dir, linkPath)
-  t.Cleanup(func() { os.Remove(linkPath) })
-  return linkPath
+  return dir
 }
+
+// ============================================================
+// WriteFileTool
+// ============================================================
 
 func TestWriteFileTool_Create(t *testing.T) {
   dir := tempWorkspace(t)
@@ -201,8 +200,9 @@ func TestEditFileTool_Ambiguous(t *testing.T) {
 
 func TestEditFileTool_FileNotExist(t *testing.T) {
   tool := &EditFileTool{}
+  dir := tempWorkspace(t)
   args, _ := json.Marshal(map[string]interface{}{
-    "path":     "/workspace/nonexistent/path.txt",
+    "path":     filepath.Join(dir, "nonexistent", "path.txt"),
     "old_text": "foo",
     "new_text": "bar",
   })
@@ -436,9 +436,10 @@ func TestDeleteFileTool_DeleteDir(t *testing.T) {
 }
 
 func TestDeleteFileTool_NotExist(t *testing.T) {
+  dir := tempWorkspace(t)
   tool := &DeleteFileTool{}
   args, _ := json.Marshal(map[string]interface{}{
-    "path": "/workspace/nonexistent_file_xyz",
+    "path": filepath.Join(dir, "nonexistent_file_xyz"),
   })
 
   result, err := tool.Execute(context.Background(), args)

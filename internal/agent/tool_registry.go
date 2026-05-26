@@ -15,7 +15,7 @@ import (
   "time"
 )
 
-const sandboxWorkspace = "/workspace"
+var sandboxWorkspace = "/workspace"
 
 // safePath 验证路径在沙箱工作区内，防止路径遍历攻击
 func safePath(path string) string {
