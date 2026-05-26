@@ -6,6 +6,7 @@ import (
   "fmt"
   "os"
   "path/filepath"
+  "strings"
   "time"
 )
 
@@ -108,7 +109,7 @@ func (s *SessionStore) ListArchives(key string) ([]string, error) {
   var dates []string
   for _, e := range entries {
     name := e.Name()
-    if len(name) == 21 && name[:8] == "archive-" && name[17:] == ".jsonl" {
+    if strings.HasPrefix(name, "archive-") && strings.HasSuffix(name, ".jsonl") {
       dates = append(dates, name[8:18])
     }
   }

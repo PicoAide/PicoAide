@@ -315,6 +315,11 @@ func (s *Server) handleAdminSharedFoldersTest(c *gin.Context) {
     return
   }
 
+  if err := util.SafePathSegment(sf.Name); err != nil {
+    writeError(c, http.StatusBadRequest, "共享文件夹名称不合法")
+    return
+  }
+
   mounted := false
   msg := "用户 " + testUsername + " 未挂载"
 

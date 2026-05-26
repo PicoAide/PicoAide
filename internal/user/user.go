@@ -242,6 +242,9 @@ func SyncCookies(cfg *config.GlobalConfig, username, domain, cookieStr string) e
 // workspace:   <WorkDir>/users/<username>/
 func InitializeUser(templateDir, workspace string) error {
   workspace = filepath.Clean(workspace)
+  if !filepath.IsAbs(workspace) {
+    return fmt.Errorf("工作目录必须是绝对路径")
+  }
 
   if err := os.MkdirAll(workspace, 0755); err != nil {
     return fmt.Errorf("创建工作目录失败: %w", err)

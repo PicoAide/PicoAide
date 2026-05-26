@@ -214,7 +214,7 @@ func (s *Server) handleAdminModelTest(c *gin.Context) {
   ctx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
   defer cancel()
 
-  req, err := http.NewRequestWithContext(ctx, "POST", urlStr, bytes.NewReader(body))
+  req, err := http.NewRequestWithContext(ctx, "POST", parsedURL.String(), bytes.NewReader(body))
   if err != nil {
     writeError(c, http.StatusBadRequest, fmt.Sprintf("创建请求失败: %s", err.Error()))
     return

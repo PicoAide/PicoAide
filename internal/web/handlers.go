@@ -471,6 +471,10 @@ func (s *Server) handleChatHistory(c *gin.Context) {
   // 读取最新会话的 live.jsonl
   var messages []chatMessage
   sessDir := filepath.Join(workspace, "sessions")
+  if !strings.HasPrefix(filepath.Clean(sessDir), filepath.Clean(config.WorkDir())+string(os.PathSeparator)) {
+    writeError(c, http.StatusForbidden, "访问被拒绝")
+    return
+  }
   if entries, err := os.ReadDir(sessDir); err == nil {
     for _, entry := range entries {
       if !entry.IsDir() {
