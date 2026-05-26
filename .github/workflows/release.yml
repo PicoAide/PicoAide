@@ -17,7 +17,11 @@ jobs:
           go-version-file: go.mod
 
       - name: Prepare embed bundle
-        run: mkdir -p internal/rootfs/bundle
+        run: |
+          mkdir -p internal/rootfs/bundle
+          # 占位文件使 //go:embed 通过编译（build-server 会替换为真实文件）
+          touch internal/rootfs/bundle/picoagent
+          touch internal/rootfs/bundle/alpine-rootfs.tar.gz
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
