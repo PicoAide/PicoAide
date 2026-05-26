@@ -224,7 +224,7 @@ func (f *FeishuProvider) Send(ctx context.Context, msg SendMsg) error {
           Build()).
         Build()
 
-      resp, err := uc.client.Im.V1.Message.Create(ctx, req)
+      resp, err := uc.client.Im.Message.Create(ctx, req)
       if err != nil {
         return fmt.Errorf("飞书发送失败: %w", err)
       }
@@ -268,7 +268,7 @@ func (f *FeishuProvider) SendToUser(ctx context.Context, username string, text s
       Build()).
     Build()
 
-  resp, err := uc.client.Im.V1.Message.Create(ctx, req)
+  resp, err := uc.client.Im.Message.Create(ctx, req)
   if err != nil {
     return fmt.Errorf("飞书发送失败: %w", err)
   }

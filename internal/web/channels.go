@@ -102,10 +102,7 @@ func (s *Server) handleAdminChannelsGet(c *gin.Context) {
     return
   }
 
-  items := make([]channelDef, 0)
-  for _, d := range channelDefs {
-    items = append(items, d)
-  }
+  items := append([]channelDef{}, channelDefs...)
 
   writeJSON(c, http.StatusOK, map[string]interface{}{
     "success":  true,

@@ -371,6 +371,7 @@ func (m *Manager) Run(ctx context.Context, token string, inputJSON []byte, works
 
   cleanup, stdout, cmd, err := m.prepareSandbox(runCtx, token, inputJSON, workspace, apiKeys, mounts, username)
   if err != nil {
+    cancel()
     return nil, err
   }
 
