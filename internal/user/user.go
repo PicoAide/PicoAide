@@ -241,6 +241,9 @@ func SyncCookies(cfg *config.GlobalConfig, username, domain, cookieStr string) e
 // usersRoot:   <WorkDir>/users/
 // username:    经过 ValidateUsername 校验的用户名
 func InitializeUser(templateDir, usersRoot, username string) error {
+  if err := util.SafePathSegment(username); err != nil {
+    return fmt.Errorf("用户名不合法: %w", err)
+  }
   workspace := filepath.Join(usersRoot, username)
 
   if err := os.MkdirAll(workspace, 0755); err != nil {

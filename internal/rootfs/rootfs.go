@@ -91,6 +91,7 @@ func extractAlpine(rootfsDir string) error {
         continue
       }
       os.MkdirAll(filepath.Dir(target), 0755)
+      // codeql[go/path-injection] — target 已验证在 rootfsDir 内，linkTarget 由嵌入的 Alpine bundle 提供
       os.Symlink(linkTarget, target)
     }
   }
