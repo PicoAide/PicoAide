@@ -195,7 +195,7 @@ func (t *CommandTool) Execute(ctx context.Context, args json.RawMessage) (*ToolR
     if output != "" {
       msg += "\n" + output
     }
-    return &ToolResult{Success: true, Data: msg}, nil
+    return &ToolResult{Success: false, Data: msg}, nil
   }
 
   output := strings.TrimSpace(stdout.String())
@@ -274,7 +274,7 @@ func (t *ReadFileTool) Execute(ctx context.Context, args json.RawMessage) (*Tool
 
   data, err := os.ReadFile(cleanPath)
   if err != nil {
-    return &ToolResult{Success: true, Data: fmt.Sprintf("读取失败: %v", err)}, nil
+    return &ToolResult{Success: false, Data: fmt.Sprintf("读取失败: %v", err)}, nil
   }
 
   content := strings.TrimSpace(string(data))
@@ -345,7 +345,7 @@ func (t *GrepTool) Execute(ctx context.Context, args json.RawMessage) (*ToolResu
     if errOutput != "" {
       msg += ": " + errOutput
     }
-    return &ToolResult{Success: true, Data: msg}, nil
+    return &ToolResult{Success: false, Data: msg}, nil
   }
 
   output := strings.TrimSpace(stdout.String())
@@ -422,7 +422,7 @@ func (t *WriteFileTool) Execute(ctx context.Context, args json.RawMessage) (*Too
 
   dir := filepath.Dir(cleanPath)
   if err := os.MkdirAll(dir, 0755); err != nil {
-    return &ToolResult{Success: true, Data: fmt.Sprintf("创建目录失败: %v", err)}, nil
+    return &ToolResult{Success: false, Data: fmt.Sprintf("创建目录失败: %v", err)}, nil
   }
 
   // 限制写入大小，防止恶意写入撑爆 overlay tmpfs
@@ -432,7 +432,7 @@ func (t *WriteFileTool) Execute(ctx context.Context, args json.RawMessage) (*Too
   }
 
   if err := os.WriteFile(cleanPath, []byte(params.Content), 0644); err != nil {
-    return &ToolResult{Success: true, Data: fmt.Sprintf("写入失败: %v", err)}, nil
+    return &ToolResult{Success: false, Data: fmt.Sprintf("写入失败: %v", err)}, nil
   }
 
   return &ToolResult{Success: true, Data: "写入成功: " + params.Path}, nil
@@ -493,7 +493,7 @@ func (t *EditFileTool) Execute(ctx context.Context, args json.RawMessage) (*Tool
 
   data, err := os.ReadFile(cleanPath)
   if err != nil {
-    return &ToolResult{Success: true, Data: fmt.Sprintf("读取失败: %v", err)}, nil
+    return &ToolResult{Success: false, Data: fmt.Sprintf("读取失败: %v", err)}, nil
   }
 
   content := string(data)
@@ -508,7 +508,7 @@ func (t *EditFileTool) Execute(ctx context.Context, args json.RawMessage) (*Tool
 
   newContent := strings.Replace(content, params.OldText, params.NewText, 1)
   if err := os.WriteFile(cleanPath, []byte(newContent), 0644); err != nil {
-    return &ToolResult{Success: true, Data: fmt.Sprintf("写入失败: %v", err)}, nil
+    return &ToolResult{Success: false, Data: fmt.Sprintf("写入失败: %v", err)}, nil
   }
 
   return &ToolResult{Success: true, Data: "替换成功"}, nil
@@ -564,12 +564,12 @@ func (t *AppendFileTool) Execute(ctx context.Context, args json.RawMessage) (*To
 
   dir := filepath.Dir(cleanPath)
   if err := os.MkdirAll(dir, 0755); err != nil {
-    return &ToolResult{Success: true, Data: fmt.Sprintf("创建目录失败: %v", err)}, nil
+    return &ToolResult{Success: false, Data: fmt.Sprintf("创建目录失败: %v", err)}, nil
   }
 
   f, err := os.OpenFile(cleanPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
   if err != nil {
-    return &ToolResult{Success: true, Data: fmt.Sprintf("打开文件失败: %v", err)}, nil
+    return &ToolResult{Success: false, Data: fmt.Sprintf("打开文件失败: %v", err)}, nil
   }
   defer func() {
     if cerr := f.Close(); cerr != nil {
@@ -578,7 +578,7 @@ func (t *AppendFileTool) Execute(ctx context.Context, args json.RawMessage) (*To
   }()
 
   if _, err := f.WriteString(params.Content); err != nil {
-    return &ToolResult{Success: true, Data: fmt.Sprintf("写入失败: %v", err)}, nil
+    return &ToolResult{Success: false, Data: fmt.Sprintf("写入失败: %v", err)}, nil
   }
 
   return &ToolResult{Success: true, Data: "追加成功"}, nil
@@ -701,7 +701,7 @@ func (t *GlobTool) Execute(ctx context.Context, args json.RawMessage) (*ToolResu
 
   matches, err := filepath.Glob(p)
   if err != nil {
-    return &ToolResult{Success: true, Data: fmt.Sprintf("glob 搜索失败: %v", err)}, nil
+    return &ToolResult{Success: false, Data: fmt.Sprintf("glob 搜索失败: %v", err)}, nil
   }
 
   if len(matches) == 0 {
@@ -761,7 +761,7 @@ func (t *DeleteFileTool) Execute(ctx context.Context, args json.RawMessage) (*To
   }
 
   if err := os.RemoveAll(cleanPath); err != nil {
-    return &ToolResult{Success: true, Data: fmt.Sprintf("删除失败: %v", err)}, nil
+    return &ToolResult{Success: false, Data: fmt.Sprintf("删除失败: %v", err)}, nil
   }
 
   return &ToolResult{Success: true, Data: "删除成功"}, nil

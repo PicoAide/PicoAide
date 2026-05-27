@@ -7,6 +7,7 @@ import (
   "path/filepath"
   "strings"
   "testing"
+  "time"
 )
 
 func init() {
@@ -463,5 +464,52 @@ func TestDeleteFileTool_EmptyPath(t *testing.T) {
   }
   if result.Success {
     t.Errorf("expected failure for empty path")
+  }
+}
+
+func TestCommandTool_ErrorReturnsSuccessFalse(t *testing.T) {
+  tool := &CommandTool{Timeout: time.Second}
+  result, err := tool.Execute(context.Background(), json.RawMessage(`{"command": "exit 1"}`))
+  if err != nil {
+    t.Fatal(err)
+  }
+  if result.Success {
+    t.Error("expected Success=false for failing command")
+  }
+}
+
+func TestReadFileTool_NotFoundReturnsSuccessFalse(t *testing.T) {
+  dir := tempWorkspace(t)
+  tool := &ReadFileTool{}
+  args, _ := json.Marshal(map[string]string{"path": filepath.Join(dir, "nonexistent_file_xyz")})
+  result, err := tool.Execute(context.Background(), args)
+  if err != nil {
+    t.Fatal(err)
+  }
+  if result.Success {
+    t.Error("expected Success=false for non-existent file, got Success=true")
+  }
+}
+
+func TestWriteFileTool_DirCreationFailureReturnsSuccessFalse(t *testing.T) {
+  // Write to a path where dir creation should fail: a file that blocks the path
+  dir := tempWorkspace(t)
+  // Create a regular file in place of a directory to block path
+  blockPath := filepath.Join(dir, "blockfile")
+  os.WriteFile(blockPath, []byte("block"), 0644)
+  blockedPath := filepath.Join(blockPath, "subdir", "file.txt")
+
+  tool := &WriteFileTool{}
+  args, _ := json.Marshal(map[string]interface{}{
+    "path":    blockedPath,
+    "content": "test",
+    "overwrite": true,
+  })
+  result, err := tool.Execute(context.Background(), args)
+  if err != nil {
+    t.Fatal(err)
+  }
+  if result.Success {
+    t.Error("expected Success=false for dir creation failure, got Success=true")
   }
 }
