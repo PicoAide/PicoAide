@@ -87,16 +87,19 @@ type Engine struct {
   skills        []*Skill
   subAgentMgr   *SubAgentManager
   sessionKey    string // 当前会话 key，压缩后写回 store
+  fsyncInterval int    // 每隔 N 轮 fsync 一次会话，0 禁用
+  iterCount     int    // 当前 Process 的迭代计数
 }
 
 func NewEngine(cfg *AgentConfig, provider Provider, tools *ToolRegistry, store *SessionStore) *Engine {
   return &Engine{
-    provider:     provider,
-    tools:        tools,
-    store:        store,
-    compactor:    NewCompactor(DefaultCompactionConfig()),
-    config:       cfg,
-    subAgentMgr:  NewSubAgentManager(),
+    provider:      provider,
+    tools:         tools,
+    store:         store,
+    compactor:     NewCompactor(DefaultCompactionConfig()),
+    config:        cfg,
+    subAgentMgr:   NewSubAgentManager(),
+    fsyncInterval: 5,
   }
 }
 
@@ -114,6 +117,25 @@ func (e *Engine) SetSkills(skills []*Skill) {
 
 func (e *Engine) SubAgentManager() *SubAgentManager {
   return e.subAgentMgr
+}
+
+// fsyncSession 持久化当前消息列表到 live.jsonl
+func (e *Engine) fsyncSession(msgs []LLMMessage) {
+  if e.sessionKey == "" || e.store == nil || len(msgs) == 0 {
+    return
+  }
+  persisted := make([]*Message, len(msgs))
+  for i, m := range msgs {
+    persisted[i] = &Message{
+      Role:       MessageRole(m.Role),
+      Content:    m.Content,
+      ToolCallID: m.ToolCallID,
+      ToolCalls:  m.ToolCalls,
+    }
+  }
+  if err := e.store.ReplaceLive(e.sessionKey, persisted); err != nil {
+    slog.Debug("agent.fsync_error", "error", err.Error())
+  }
 }
 
 // Process 处理一条消息，通过 cb 返回流式事件
@@ -211,6 +233,7 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
     perIterTimeout = 120
   }
 
+  emptyRespRetries := 0
   for iter := 0; iter < maxIter; iter++ {
     // 每轮独立超时：LLM 调用 + 工具执行共享一条超时线
     iterCtx, iterCancel := context.WithTimeout(cancelCtx, time.Duration(perIterTimeout)*time.Second)
@@ -365,6 +388,20 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
     )
 
     if len(pendingTools) == 0 {
+      if len(currentResp) == 0 {
+        // LLM 返回空响应（无文字、无工具调用），可能是临时问题
+        // 重试最多 3 次避免死循环，超过 3 次才视为真正完成
+        if emptyRespRetries >= 3 {
+          fullResponse = currentResp
+          slog.Debug("agent.no_tool_calls", "response_length", len(fullResponse), "empty_retries", emptyRespRetries)
+          iterCancel()
+          break
+        }
+        emptyRespRetries++
+        slog.Debug("agent.empty_response_retry", "retry", emptyRespRetries)
+        iterCancel()
+        continue
+      }
       fullResponse = currentResp
       slog.Debug("agent.no_tool_calls", "response_length", len(fullResponse))
       iterCancel()
@@ -446,6 +483,13 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
         slog.Debug("agent.post_turn_compact_done", "token_count", estimateTokens(sysPrompt, llmMsgs))
       }
     }
+
+    // 定期 fsync 会话
+    e.iterCount++
+    if e.fsyncInterval > 0 && e.iterCount%e.fsyncInterval == 0 {
+      e.fsyncSession(llmMsgs)
+    }
+
     iterCancel()
   }
 

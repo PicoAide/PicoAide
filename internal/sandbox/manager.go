@@ -121,7 +121,16 @@ func (m *Manager) prepareSandbox(ctx context.Context, token string, inputJSON []
     return nil, nil, nil, err
   }
 
+  // defer 确保 panic 时也释放用户锁
+  var released bool
+  defer func() {
+    if !released {
+      m.releaseUser(username)
+    }
+  }()
+
   if _, err := os.Stat(m.rootfs); err != nil {
+    released = true
     m.releaseUser(username)
     return nil, nil, nil, fmt.Errorf("rootfs 不存在 %s: %w", m.rootfs, err)
   }
@@ -138,6 +147,7 @@ func (m *Manager) prepareSandbox(ctx context.Context, token string, inputJSON []
   os.MkdirAll(upperDir, 0755)
 
   if err := syscall.Mount("tmpfs", upperDir, "tmpfs", 0, ""); err != nil {
+    released = true
     m.releaseUser(username)
     return nil, nil, nil, fmt.Errorf("tmpfs 挂载失败: %w", err)
   }
@@ -149,6 +159,7 @@ func (m *Manager) prepareSandbox(ctx context.Context, token string, inputJSON []
     m.rootfs, filepath.Join(upperDir, "up"), filepath.Join(upperDir, "wd"))
   if err := syscall.Mount("overlay", mergeDir, "overlay", 0, opts); err != nil {
     syscall.Unmount(upperDir, syscall.MNT_DETACH)
+    released = true
     m.releaseUser(username)
     return nil, nil, nil, fmt.Errorf("overlay 挂载失败: %w", err)
   }
@@ -170,6 +181,7 @@ func (m *Manager) prepareSandbox(ctx context.Context, token string, inputJSON []
       os.RemoveAll(upperDir)
       os.RemoveAll(mergeDir)
       m.releaseUser(username)
+      released = true
       slog.Debug("sandbox.cleanup_complete")
     })
   }
@@ -262,6 +274,7 @@ func (m *Manager) prepareSandbox(ctx context.Context, token string, inputJSON []
   stdin.Write(inputJSON)
   stdin.Close()
 
+  released = true
   return localCleanup, stdout, cmd, nil
 }
 
