@@ -351,3 +351,36 @@ func TestStreamEvents_OnlyEmptyLines(t *testing.T) {
     t.Error("expected channel to be closed immediately for only empty lines")
   }
 }
+
+func TestUserLock_ReleasedOnPanic(t *testing.T) {
+  m := NewManager("/tmp/nonexistent", t.TempDir())
+  username := "panic-test-user"
+
+  // Acquire the lock normally
+  err := m.acquireUser(context.Background(), username)
+  if err != nil {
+    t.Fatal(err)
+  }
+
+  // Simulate a function that panics after acquiring (like prepareSandbox)
+  func() {
+    defer func() { recover() }()
+    var released bool
+    defer func() {
+      if !released {
+        m.releaseUser(username)
+      }
+    }()
+    panic("simulated panic")
+    // released = true never reached
+  }()
+
+  // Lock should be released by the defer
+  ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+  defer cancel()
+  err = m.acquireUser(ctx, username)
+  if err != nil {
+    t.Fatal("lock not released after panic, acquire blocked")
+  }
+  m.releaseUser(username)
+}
