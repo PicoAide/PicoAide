@@ -19,10 +19,12 @@ import (
 )
 
 type MCPToolManager struct {
-  mu           sync.Mutex
-  sessions     map[string]*mcp.ClientSession
-  tools        map[string]*mcpToolEntry
-  WorkspaceDir string // 沙箱工作区路径，用于保存文件等
+  mu            sync.Mutex
+  sessions      map[string]*mcp.ClientSession
+  tools         map[string]*mcpToolEntry
+  serverConfigs map[string]MCPServer
+  mcpToken      string
+  WorkspaceDir  string // 沙箱工作区路径，用于保存文件等
 }
 
 type mcpToolEntry struct {
@@ -32,12 +34,45 @@ type mcpToolEntry struct {
 
 func NewMCPToolManager() *MCPToolManager {
   return &MCPToolManager{
-    sessions: make(map[string]*mcp.ClientSession),
-    tools:    make(map[string]*mcpToolEntry),
+    sessions:      make(map[string]*mcp.ClientSession),
+    tools:         make(map[string]*mcpToolEntry),
+    serverConfigs: make(map[string]MCPServer),
   }
 }
 
+func (m *MCPToolManager) SetToken(token string) {
+  m.mu.Lock()
+  defer m.mu.Unlock()
+  m.mcpToken = token
+}
+
 func (m *MCPToolManager) Connect(ctx context.Context, name string, server *MCPServer, token string) error {
+  m.mu.Lock()
+  m.serverConfigs[name] = *server
+  m.mcpToken = token
+  m.mu.Unlock()
+
+  var lastErr error
+  for attempt := 0; attempt < 2; attempt++ {
+    if attempt > 0 {
+      slog.Debug("mcp.reconnect", "server", name, "attempt", attempt+1)
+      select {
+      case <-time.After(time.Second):
+      case <-ctx.Done():
+        return ctx.Err()
+      }
+    }
+    if err := m.connectOnce(ctx, name, server, token); err != nil {
+      lastErr = err
+      continue
+    }
+    return nil
+  }
+  return fmt.Errorf("MCP %s 连接失败(重试2次): %w", name, lastErr)
+}
+
+// connectOnce 单次 MCP 连接尝试
+func (m *MCPToolManager) connectOnce(ctx context.Context, name string, server *MCPServer, token string) error {
   mcpClient := mcp.NewClient(&mcp.Implementation{
     Name:    "picoagent",
     Version: "2.0.0",
@@ -46,7 +81,7 @@ func (m *MCPToolManager) Connect(ctx context.Context, name string, server *MCPSe
   endpoint := fmt.Sprintf("http://localhost/api/mcp/sse/%s?token=%s", name, url.QueryEscape(token))
 
   transport := &mcp.StreamableClientTransport{
-    Endpoint:      endpoint,
+    Endpoint:             endpoint,
     DisableStandaloneSSE: true,
   }
 
@@ -89,6 +124,20 @@ func (m *MCPToolManager) Connect(ctx context.Context, name string, server *MCPSe
   return nil
 }
 
+// tryReconnect 尝试重新连接指定 MCP 服务器
+func (m *MCPToolManager) tryReconnect(ctx context.Context, name string) error {
+  m.mu.Lock()
+  config, ok := m.serverConfigs[name]
+  token := m.mcpToken
+  m.mu.Unlock()
+
+  if !ok {
+    return fmt.Errorf("MCP 服务器 %s 配置不存在", name)
+  }
+
+  return m.Connect(ctx, name, &config, token)
+}
+
 func (m *MCPToolManager) RegisterAll(registry *ToolRegistry) {
   m.mu.Lock()
   defer m.mu.Unlock()
@@ -105,13 +154,51 @@ func (m *MCPToolManager) RegisterAll(registry *ToolRegistry) {
 }
 
 func (m *MCPToolManager) CallTool(ctx context.Context, serverName, toolName string, args map[string]interface{}) (*mcp.CallToolResult, error) {
-  m.mu.Lock()
-  session, ok := m.sessions[serverName]
-  m.mu.Unlock()
-  if !ok {
-    return nil, fmt.Errorf("MCP 服务器 %s 未连接", serverName)
+  session := m.getSession(serverName)
+  if session == nil {
+    // 尝试自动重连
+    if err := m.tryReconnect(ctx, serverName); err != nil {
+      return nil, err
+    }
+    session = m.getSession(serverName)
+    if session == nil {
+      return nil, fmt.Errorf("MCP 服务器 %s 重连后仍然不可用", serverName)
+    }
   }
-  return session.CallTool(ctx, &mcp.CallToolParams{Name: toolName, Arguments: args})
+
+  result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: toolName, Arguments: args})
+  if err != nil && isConnError(err) {
+    // 连接断开，尝试重连后重试一次
+    slog.Debug("mcp.calltool_reconnecting", "server", serverName, "tool", toolName)
+    if reconnectErr := m.tryReconnect(ctx, serverName); reconnectErr == nil {
+      if newSession := m.getSession(serverName); newSession != nil {
+        return newSession.CallTool(ctx, &mcp.CallToolParams{Name: toolName, Arguments: args})
+      }
+    }
+    return nil, err
+  }
+  return result, nil
+}
+
+// getSession 线程安全地获取 session
+func (m *MCPToolManager) getSession(name string) *mcp.ClientSession {
+  m.mu.Lock()
+  defer m.mu.Unlock()
+  return m.sessions[name]
+}
+
+// isConnError 判断是否为连接类错误（可重连）
+func isConnError(err error) bool {
+  if err == nil {
+    return false
+  }
+  msg := err.Error()
+  return strings.Contains(msg, "unexpected EOF") ||
+    strings.Contains(msg, "connection") ||
+    strings.Contains(msg, "reset") ||
+    strings.Contains(msg, "stream error") ||
+    strings.Contains(msg, "transport") ||
+    strings.Contains(msg, "broken pipe")
 }
 
 func (m *MCPToolManager) Close() {

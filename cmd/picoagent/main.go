@@ -118,6 +118,7 @@ func main() {
   if len(cfg.MCPServers) > 0 {
     mcpManager := agent.NewMCPToolManager()
     mcpManager.WorkspaceDir = cfg.Workspace
+    mcpManager.SetToken(token)
     for serverName, serverCfg := range cfg.MCPServers {
       if serverCfg.Socket == "" {
         continue
