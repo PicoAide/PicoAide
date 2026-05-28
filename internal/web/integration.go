@@ -164,9 +164,19 @@ func (s *Server) handleIMMessage(ctx context.Context, msg im.Message) {
     }
   }
 
-  // 通过 chatRun 启动沙箱（Web 端可同时查看实时内容）
+  // 构造输入消息
   input := agent.Message{Role: agent.RoleUser, Content: msg.Text}
   inputJSON, _ := json.Marshal(input)
+
+  // 如果用户已有活跃沙箱，追加消息到现有会话
+  if s.agentIntegration != nil && s.agentIntegration.sandbox != nil {
+    if err := s.agentIntegration.sandbox.SendInput(username, inputJSON); err == nil {
+      slog.Debug("chat.sandbox_appended", "username", username, "text_length", len(msg.Text))
+      return
+    }
+  }
+
+  // 没有活跃沙箱，创建新沙箱
   run := s.startChatSandbox(username, msg.Text, inputJSON)
 
   // 订阅 chatRun 事件，转发到 IM
