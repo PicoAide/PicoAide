@@ -279,7 +279,9 @@ func (s *Server) executeCronJob(ctx context.Context, sb *sandbox.Manager, store 
   apiKeys := s.loadAPIKeys()
   apiKeys["PICOAGENT_CHANNEL"] = "cron"
 
-  events, err := sb.Run(ctx, mcpToken, inputJSON, workspace, apiKeys, buildSkillMounts(job.UserID), job.UserID)
+  // 沙箱使用 Background 上下文，不设累计超时；picoagent 内部通过 perIterTimeout 控制每轮 LLM 调用
+  sandboxCtx := context.Background()
+  events, err := sb.Run(sandboxCtx, mcpToken, inputJSON, workspace, apiKeys, buildSkillMounts(job.UserID), job.UserID)
   if err != nil {
     s.notifyCronFailure(ctx, job, err)
     return err
