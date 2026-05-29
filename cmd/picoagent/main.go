@@ -140,7 +140,7 @@ func main() {
   // 6. 创建引擎 + 设置压缩器摘要 LLM
   slog.Debug("picoagent.creating_engine")
   engine := agent.NewEngine(cfg, provider, tools, store)
-  summarizer := agent.NewLLMSummarizer(provider, cfg.Model.ModelID)
+  summarizer := agent.NewLLMSummarizer(provider, cfg.Model.ModelID, cfg.Model.MaxTokens)
   engine.SetSummarizer(summarizer)
 
   // 6a. 注册子代理工具
@@ -317,6 +317,7 @@ msgLoop:
   // 会话结束，触发记忆进化
   slog.Debug("picoagent.evolving_memory")
   evolver := agent.NewMemoryEvolution(cfg.Workspace, store)
+  evolver.SetMaxTokens(cfg.Model.MaxTokens)
   if summarizer != nil {
     evolver.SetSummarizer(summarizer)
   }

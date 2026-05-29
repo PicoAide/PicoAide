@@ -54,6 +54,7 @@ type MemoryEvolution struct {
   store      *SessionStore
   summarizer Summarizer // LLM 提取器，为空时仅做格式维护
   maxMsgs    int        // 送入 LLM 的消息上限
+  maxTokens  int        // 管理员配置的 max_tokens，用于 prompt 指导输出长度
 }
 
 func NewMemoryEvolution(workspace string, store *SessionStore) *MemoryEvolution {
@@ -66,6 +67,10 @@ func NewMemoryEvolution(workspace string, store *SessionStore) *MemoryEvolution 
 
 func (e *MemoryEvolution) SetSummarizer(s Summarizer) {
   e.summarizer = s
+}
+
+func (e *MemoryEvolution) SetMaxTokens(maxTokens int) {
+  e.maxTokens = maxTokens
 }
 
 func (e *MemoryEvolution) SetMaxMsgs(n int) {
@@ -192,6 +197,10 @@ func (e *MemoryEvolution) extract(ctx context.Context, msgs []*Message, existing
     }
   }
 
+  tokenLimit := e.maxTokens
+  if tokenLimit <= 0 {
+    tokenLimit = 100000
+  }
   prompt := fmt.Sprintf(`你是一个企业 AI 助手的记忆提取器。分析以下会话记录，与现有记忆对比，提取新增的有长期价值的企业工作信息。
 
 现有的 MEMORY.md：
@@ -209,7 +218,7 @@ func (e *MemoryEvolution) extract(ctx context.Context, msgs []*Message, existing
 - 只输出企业工作相关信息，忽略问候语、闲聊、技术调试过程
 - 没有新信息时返回空对象 {}
 - 必须返回合法的 JSON
-- 总输出控制在 3000 tokens 以内，不够时可以适当增加每条的描述，但不要超过此限制`, existingMemory, dialog.String())
+- 总输出控制在 %d tokens 以内`, existingMemory, dialog.String(), tokenLimit)
 
   raw, err := e.summarizer.Summarize(ctx, prompt)
   if err != nil {
