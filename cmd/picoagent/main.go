@@ -252,14 +252,9 @@ msgLoop:
     // 保存用户消息
     store.AppendMessage(sessionKey, inputMsg)
 
-    // 处理消息（超时时间从配置读取，默认 120 秒）
-    var ctx context.Context
-    var cancel context.CancelFunc
-    if timeout > 0 {
-      ctx, cancel = context.WithTimeout(signalCtx, time.Duration(timeout)*time.Second)
-    } else {
-      ctx, cancel = context.WithCancel(signalCtx)
-    }
+    // 处理消息：使用 WithCancel 而非 WithTimeout，避免累计超时掐断多轮迭代
+    // 单轮迭代的超时由 engine 内部的 perIterTimeout 控制
+    ctx, cancel := context.WithCancel(signalCtx)
 
     slog.Debug("picoagent.engine_process_start",
       "model_id", cfg.Model.ModelID,
