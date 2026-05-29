@@ -270,9 +270,9 @@ func (l *LLMSummarizer) Summarize(ctx context.Context, prompt string) (string, e
   var summary string
   err := l.provider.StreamChat(ctx, &ChatRequest{
     Model:       l.model,
-    System:      "你是一个高效的摘要助手。请用中文简洁地总结对话要点。",
+    System:      "你是一个高效的摘要助手。请用中文简洁地总结，控制输出在 3000 tokens 以内。",
     Messages:    []LLMMessage{{Role: "user", Content: prompt}},
-    MaxTokens:   1024,
+    MaxTokens:   8192,
     Temperature: 0.3,
   }, func(event StreamEvent) {
     if event.Type == "text_delta" {

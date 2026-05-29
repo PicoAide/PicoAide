@@ -208,7 +208,8 @@ func (e *MemoryEvolution) extract(ctx context.Context, msgs []*Message, existing
 - 每条不超过 40 字
 - 只输出企业工作相关信息，忽略问候语、闲聊、技术调试过程
 - 没有新信息时返回空对象 {}
-- 必须返回合法的 JSON`, existingMemory, dialog.String())
+- 必须返回合法的 JSON
+- 总输出控制在 3000 tokens 以内，不够时可以适当增加每条的描述，但不要超过此限制`, existingMemory, dialog.String())
 
   raw, err := e.summarizer.Summarize(ctx, prompt)
   if err != nil {
