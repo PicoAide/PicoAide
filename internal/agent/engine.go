@@ -55,6 +55,14 @@ const AgentProtocol = `# Agent Protocol
 - 子代理适合文件搜索、数据处理、批量操作等后台任务
 - 子代理命名应当清晰描述其任务（如 file-search、data-transform）
 - 主代理负责等待子代理完成并整合其结果
+- **需要处理大量同类数据（如查询多个客户的信息）时，优先使用多个 subagent 并行处理，不要逐个串行查询**
+
+## 大规模数据处理
+
+- 当任务需要查询或处理大量数据条目时（如查询所有客户的舆情），使用 subagent 将任务拆分为多个并行批次
+- 系统会自动压缩大型工具返回结果（超过 2000 字符的会被自动摘要），**你无需担心上下文溢出**
+- 每个 subagent 负责一个批次，完成后返回关键摘要
+- 主代理等待所有 subagent 完成后，整合各批次结果为最终报告
 
 ## 技能使用规范
 
@@ -453,6 +461,16 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
         result = &ToolResult{Success: false, Data: fmt.Sprintf("工具执行失败: %s", execErr)}
         slog.Debug("agent.tool_execute_error", "tool", tc.Name, "error", execErr.Error())
       } else {
+        // 工具结果太大时自动压缩摘要，避免撑爆上下文
+        autoCompact := len(result.Data) > 2000 && e.compactor != nil
+        if autoCompact {
+          compactPrompt := fmt.Sprintf("用一句话概括以下工具返回结果的核心信息（保持关键数据）：\n%s", result.Data)
+          compacted, compactErr := e.compactor.SummarizeText(iterCtx, compactPrompt)
+          if compactErr == nil && len(compacted) > 0 && len(compacted) < len(result.Data) {
+            slog.Debug("agent.tool_result_compacted", "tool", tc.Name, "before", len(result.Data), "after", len(compacted))
+            result.Data = "[自动摘要] " + compacted
+          }
+        }
         resultPreview := result.Data
         if len(resultPreview) > 200 {
           resultPreview = resultPreview[:200] + "..."

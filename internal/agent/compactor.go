@@ -51,6 +51,14 @@ func (c *Compactor) SetSummarizer(llm Summarizer) {
   c.llm = llm
 }
 
+// SummarizeText 使用摘要 LLM 对任意文本生成摘要（工具结果自动压缩用）
+func (c *Compactor) SummarizeText(ctx context.Context, prompt string) (string, error) {
+  if c.llm == nil {
+    return "", fmt.Errorf("summarizer not set")
+  }
+  return c.llm.Summarize(ctx, prompt)
+}
+
 // IsOverflow 判断 live 是否溢出
 func (c *Compactor) IsOverflow(tokenCount int) bool {
   return c.IsOverflowWithLimit(tokenCount, 200000)
