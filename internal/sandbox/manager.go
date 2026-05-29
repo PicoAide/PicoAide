@@ -258,9 +258,13 @@ func (m *Manager) prepareSandbox(ctx context.Context, token string, inputJSON []
     "PATH=/bin:/usr/bin:/usr/local/bin",
   }
 
-  // 注入 API key 为环境变量
-  if key, ok := apiKeys["default"]; ok {
-    env = append(env, fmt.Sprintf("PICOAGENT_API_KEY=%s", key))
+  // 注入环境变量：API key + 其他额外环境变量
+  for k, v := range apiKeys {
+    if k == "default" {
+      env = append(env, fmt.Sprintf("PICOAGENT_API_KEY=%s", v))
+    } else {
+      env = append(env, fmt.Sprintf("%s=%s", k, v))
+    }
   }
   cmd.Env = env
 

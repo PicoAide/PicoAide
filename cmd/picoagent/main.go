@@ -156,11 +156,15 @@ func main() {
     slog.Debug("picoagent.skills_loaded", "count", len(skills))
   }
 
-  // 7. 计算统一 session key（跨渠道）
+  // 7. 计算 session key（跨渠道，定时任务使用独立渠道避免混淆聊天历史）
+  channel := os.Getenv("PICOAGENT_CHANNEL")
+  if channel == "" {
+    channel = "unified"
+  }
   scope := agent.SessionScope{
     Version:    1,
     AgentID:    "pico",
-    Channel:    "unified",
+    Channel:    channel,
     Account:    cfg.UserID,
     Dimensions: []string{"user"},
     Values:     map[string]string{"user": cfg.UserID},

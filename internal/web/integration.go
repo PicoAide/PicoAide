@@ -277,6 +277,7 @@ func (s *Server) executeCronJob(ctx context.Context, sb *sandbox.Manager, store 
   }
   inputJSON, _ := json.Marshal(input)
   apiKeys := s.loadAPIKeys()
+  apiKeys["PICOAGENT_CHANNEL"] = "cron"
 
   events, err := sb.Run(ctx, mcpToken, inputJSON, workspace, apiKeys, buildSkillMounts(job.UserID), job.UserID)
   if err != nil {
