@@ -239,9 +239,12 @@ func (m *Manager) prepareSandbox(ctx context.Context, token string, inputJSON []
     os.MkdirAll(target, 0755)
     syscall.Unmount(target, syscall.MNT_DETACH)
     if err := syscall.Mount(mnt.Source, target, "", syscall.MS_BIND|syscall.MS_REC, ""); err != nil {
+      slog.Warn("sandbox.skill_mount_failed", "source", mnt.Source, "target", target, "error", err)
       continue
     }
-    syscall.Mount("", target, "", syscall.MS_REMOUNT|syscall.MS_BIND|syscall.MS_RDONLY, "")
+    if err := syscall.Mount("", target, "", syscall.MS_REMOUNT|syscall.MS_BIND|syscall.MS_RDONLY, ""); err != nil {
+      slog.Warn("sandbox.skill_remount_ro_failed", "target", target, "error", err)
+    }
   }
 
   cmd := exec.Command("/bin/picoagent")
