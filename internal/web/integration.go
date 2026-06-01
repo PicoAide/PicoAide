@@ -56,6 +56,10 @@ func (s *Server) initAgentIntegration() (*AgentIntegration, error) {
         if json.Unmarshal([]byte(ch.Credentials), &creds) == nil {
           if creds["client_id"] != "" && creds["client_secret"] != "" {
             dingtalkProvider.AddUser(ch.Username, creds["client_id"], creds["client_secret"], creds["default_chat"])
+            // 重启后恢复持久化的 session webhook
+            if creds["webhook"] != "" && creds["default_chat"] != "" {
+              dingtalkProvider.SetUserWebhook(ch.Username, creds["default_chat"], creds["webhook"])
+            }
           }
         }
       }
@@ -136,13 +140,21 @@ func (s *Server) handleIMMessage(ctx context.Context, msg im.Message) {
     return
   }
 
-  // 保存当前会话 ID 作为该用户的默认通知渠道
+  // 保存当前会话 ID + webhook 作为该用户的默认通知渠道
   if msg.ChatID != "" {
     if existing, err := auth.GetUserChannel(username, msg.Platform); err == nil && existing != nil {
       var creds map[string]string
       if json.Unmarshal([]byte(existing.Credentials), &creds) == nil {
+        changed := false
         if creds["default_chat"] != msg.ChatID {
           creds["default_chat"] = msg.ChatID
+          changed = true
+        }
+        if webhook := msg.Raw["webhook"]; webhook != "" && creds["webhook"] != webhook {
+          creds["webhook"] = webhook
+          changed = true
+        }
+        if changed {
           updated, _ := json.Marshal(creds)
           auth.UpsertUserChannelWithCreds(username, msg.Platform, existing.Enabled, existing.Configured, string(updated))
         }
@@ -316,7 +328,7 @@ func (s *Server) sendCronResult(ctx context.Context, job *scheduler.CronJob, res
   for _, ch := range channels {
     if ch.Enabled && ch.Configured {
       if err := s.agentIntegration.imGateway.SendToUser(ctx, ch.Channel, job.UserID, result); err != nil {
-        slog.Warn("定时任务结果发送失败", "platform", ch.Channel, "error", err)
+        slog.Warn("定时任务结果发送失败", "platform", ch.Channel, "error", err, "hint", "请用户在钉钉中向 PicoAide 机器人发送一条消息以建立会话")
       }
     }
   }

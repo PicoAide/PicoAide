@@ -98,6 +98,19 @@ func (d *DingTalkProvider) AddUser(username, clientID, clientSecret string, defa
   }
 }
 
+// SetUserWebhook 恢复用户持久化的 session webhook（重启后调用）
+func (d *DingTalkProvider) SetUserWebhook(username string, chatID string, webhook string) {
+  d.mu.Lock()
+  defer d.mu.Unlock()
+  if uc, ok := d.conns[username]; ok && webhook != "" && chatID != "" {
+    uc.sessionWebhooks.Store(chatID, webhook)
+    if uc.defaultChat == "" {
+      uc.defaultChat = chatID
+    }
+    slog.Debug("恢复钉钉会话 webhook", "username", username, "chat_id", chatID)
+  }
+}
+
 // RemoveUser 移除用户的钉钉连接
 func (d *DingTalkProvider) RemoveUser(username string) {
   slog.Info("钉钉渠道移除用户连接", "username", username)
@@ -210,6 +223,7 @@ func (d *DingTalkProvider) onUserMessage(uc *userConn, ctx context.Context, data
         "conversation_id":   data.ConversationId,
         "conversation_type": data.ConversationType,
         "username":          uc.username,
+        "webhook":           data.SessionWebhook,
       },
     })
   }
