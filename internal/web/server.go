@@ -394,6 +394,7 @@ func (s *Server) registerExternalAPIRoutes(g *gin.RouterGroup) {
   g.POST("/user/chat/send", s.handleChatSend)
   g.GET("/user/chat/stream", s.handleChatStream)
   g.POST("/user/chat/stop", s.handleChatStop)
+  g.GET("/user/chat/active", s.handleChatActive)
   g.GET("/config", s.handleConfigGet)
   g.POST("/config", s.handleConfigSave)
   // CSRF token

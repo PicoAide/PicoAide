@@ -50,20 +50,17 @@ const AgentProtocol = `# Agent Protocol
 - 禁止读取或泄露敏感文件（/etc/shadow、.env、密钥文件、配置文件中的密码等）
 - 禁止向外部发送敏感数据
 
-## 子代理使用规范
+## 子代理（独立 AI）使用规范
 
-- 使用 subagent_task 工具启动子代理执行并行任务
-- 子代理适合文件搜索、数据处理、批量操作等后台任务
-- 子代理命名应当清晰描述其任务（如 file-search、data-transform）
-- 主代理负责等待子代理完成并整合其结果
-- **批量任务必须使用 subagent 并行处理**：当需要处理 N 个同类条目时，立即创建多个 subagent 并行执行，每个负责一批。**禁止逐个串行处理**
-
-## 大规模数据处理
-
-- **批量任务直接用 subagent 拆分**：将 N 个条目均分为多个批次，每个批次启动一个 subagent。例如 20 个客户查舆情 → 拆 4 个 subagent 各查 5 家
-- **主 agent 不做具体查询工作**：只负责拆分任务、分发批次、等所有 subagent 完成后汇总结果
-- 每个 subagent 完成后返回关键摘要，主 agent 不保留原始数据
-- 如果某个 subagent 失败，主 agent 重新分发该批次即可
+- 使用 subagent_spawn 工具创建子代理（独立 AI 实例），使用 subagent_collect 工具收集结果
+- 每个子代理拥有独立的 LLM 上下文、会话历史和全部工具调用能力（含 MCP 工具）
+- 子代理与主 agent 使用相同的模型和超时配置
+- 适合：批量客户查舆情、多文件并行处理、数据提取等需要 AI 判断的复杂任务
+- **批量任务必须使用子代理并行处理**：先 spawn 所有子代理，再逐一 collect，实现真正的并行执行
+  例如 50 个客户查舆情 → 拆 5 个子代理各查 10 家：
+  1. 依次调用 subagent_spawn(name="batch1", task="查前 10 家"), subagent_spawn(name="batch2", task="查下 10 家")...
+  2. 然后逐一调用 subagent_collect(name="batch1"), subagent_collect(name="batch2")... 获取结果
+- 如果某个子代理失败，主 agent 重新分发该批次即可
 
 ## 技能使用规范
 
@@ -98,16 +95,18 @@ const AgentProtocol = `# Agent Protocol
 // ============================================================
 
 type Engine struct {
-  provider      Provider
-  tools         *ToolRegistry
-  store         *SessionStore
-  compactor     *Compactor
-  config        *AgentConfig
-  skills        []*Skill
-  subAgentMgr   *SubAgentManager
-  sessionKey    string // 当前会话 key，压缩后写回 store
-  fsyncInterval int    // 每隔 N 轮 fsync 一次会话，0 禁用
-  iterCount     int    // 当前 Process 的迭代计数
+  provider          Provider
+  tools             *ToolRegistry
+  store             *SessionStore
+  compactor         *Compactor
+  config            *AgentConfig
+  skills            []*Skill
+  subAgentMgr       *SubAgentManager
+  sessionKey        string   // 当前会话 key，压缩后写回 store
+  fsyncInterval     int      // 每隔 N 轮 fsync 一次会话，0 禁用
+  iterCount         int      // 当前 Process 的迭代计数
+  preloadedServers  []string // 子代理预加载的 MCP 服务器
+  preloadedSystem   string   // 追加到 system prompt 的内容（如工具指引）
 }
 
 func NewEngine(cfg *AgentConfig, provider Provider, tools *ToolRegistry, store *SessionStore) *Engine {
@@ -117,7 +116,6 @@ func NewEngine(cfg *AgentConfig, provider Provider, tools *ToolRegistry, store *
     store:         store,
     compactor:     NewCompactor(DefaultCompactionConfig()),
     config:        cfg,
-    subAgentMgr:   NewSubAgentManager(),
     fsyncInterval: 5,
   }
 }
@@ -136,6 +134,45 @@ func (e *Engine) SetSkills(skills []*Skill) {
 
 func (e *Engine) SubAgentManager() *SubAgentManager {
   return e.subAgentMgr
+}
+
+func (e *Engine) SetSubAgentManager(mgr *SubAgentManager) {
+  e.subAgentMgr = mgr
+}
+
+// PreloadServer 预加载指定 MCP 服务器的工具到引擎工具列表
+func (e *Engine) PreloadServer(serverName string) {
+  for _, s := range e.preloadedServers {
+    if s == serverName {
+      return
+    }
+  }
+  e.preloadedServers = append(e.preloadedServers, serverName)
+}
+
+// AppendToSystemPrompt 追加内容到 system prompt 末尾
+func (e *Engine) AppendToSystemPrompt(text string) {
+  if e.preloadedSystem != "" {
+    e.preloadedSystem += "\n" + text
+  } else {
+    e.preloadedSystem = text
+  }
+}
+
+// buildServerSummary 从工具注册表中生成 MCP 服务器摘要
+func (e *Engine) buildServerSummary() string {
+  servers := e.tools.ListServers()
+  if len(servers) == 0 {
+    return ""
+  }
+  var lines []string
+  for _, s := range servers {
+    // 尝试从 MCP 工具管理中获取摘要，如果没有则从工具列表生成
+    tools := e.tools.ListByServer(s)
+    summary := generateServerSummary(s, tools)
+    lines = append(lines, "- "+summary)
+  }
+  return strings.Join(lines, "\n")
 }
 
 // fsyncSession 持久化当前消息列表到 live.jsonl
@@ -198,6 +235,20 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
     }
   }
 
+  // 主 agent 模式下添加 MCP 服务器摘要
+  if len(e.preloadedServers) == 0 {
+    serverSummary := e.buildServerSummary()
+    if serverSummary != "" {
+      sysPrompt = sysPrompt + "\n\n## 可用 MCP 服务器\n" + serverSummary +
+        "\n\n使用 query_server 工具快速调用某个 MCP 服务器的工具。批量任务请使用 subagent_spawn + subagent_collect。"
+    }
+  }
+
+  // 追加预置内容（如子代理工具指引）
+  if e.preloadedSystem != "" {
+    sysPrompt = sysPrompt + "\n\n" + e.preloadedSystem
+  }
+
   slog.Debug("agent.system_prompt_built", "sys_prompt_length", len(sysPrompt))
 
   var fullResponse string
@@ -219,10 +270,10 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
       maxIter = 20
     }
   }
-  // 使用管理员配置的 max_tokens，未设置时默认为 100000（不硬截断，通过 prompt 控制）
+  // 使用管理员配置的 max_tokens。为 0 时仍设 16384 上限，防止 thinking mode 无限输出
   maxTokens := m.MaxTokens
   if maxTokens <= 0 {
-    maxTokens = 100000
+    maxTokens = 16384
   }
   temperature := m.Temperature
   if temperature <= 0 {
@@ -322,7 +373,11 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
       }),
     })
 
-    toolDefs := e.tools.Resolve(iterCtx)
+    // 构建工具列表：基础工具 + 预加载的 MCP 服务器工具
+    toolDefs := e.tools.ListBasic()
+    for _, srv := range e.preloadedServers {
+      toolDefs = append(toolDefs, e.tools.ListByServer(srv)...)
+    }
     var pendingTools []ToolCallData
     var currentResp string
 
@@ -475,16 +530,6 @@ func (e *Engine) Process(ctx context.Context, sysPrompt string, history []*Messa
         result = &ToolResult{Success: false, Data: fmt.Sprintf("工具执行失败: %s", execErr)}
         slog.Debug("agent.tool_execute_error", "tool", tc.Name, "error", execErr.Error())
       } else {
-        // 工具结果太大时自动压缩摘要，避免撑爆上下文
-        autoCompact := len(result.Data) > 2000 && e.compactor != nil
-        if autoCompact {
-          compactPrompt := fmt.Sprintf("用一句话概括以下工具返回结果的核心信息（保持关键数据）：\n%s", result.Data)
-          compacted, compactErr := e.compactor.SummarizeText(iterCtx, compactPrompt)
-          if compactErr == nil && len(compacted) > 0 && len(compacted) < len(result.Data) {
-            slog.Debug("agent.tool_result_compacted", "tool", tc.Name, "before", len(result.Data), "after", len(compacted))
-            result.Data = "[自动摘要] " + compacted
-          }
-        }
         resultPreview := result.Data
         if len(resultPreview) > 200 {
           resultPreview = resultPreview[:200] + "..."

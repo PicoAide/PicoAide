@@ -468,8 +468,8 @@ func (s *Server) handleChatHistory(c *gin.Context) {
   workspace := filepath.Join(config.WorkDir(), "users", username)
   user.InitializeUser(filepath.Join(config.WorkDir(), "user-template"), filepath.Join(config.WorkDir(), "users"), username)
 
-  // 读取最新会话的 live.jsonl
   var messages []chatMessage
+  var events []streamEvent
   sessDir := filepath.Join(workspace, "sessions")
   if !strings.HasPrefix(filepath.Clean(sessDir), filepath.Clean(config.WorkDir())+string(os.PathSeparator)) {
     writeError(c, http.StatusForbidden, "访问被拒绝")
@@ -480,37 +480,57 @@ func (s *Server) handleChatHistory(c *gin.Context) {
       if !entry.IsDir() {
         continue
       }
-      liveFile := filepath.Join(sessDir, entry.Name(), "live.jsonl")
-      if !strings.HasPrefix(filepath.Clean(liveFile), sessDir+string(os.PathSeparator)) {
-        continue
-      }
-      f, err := os.Open(liveFile)
-      if err != nil {
-        continue
-      }
-      scanner := bufio.NewScanner(f)
-      for scanner.Scan() {
-        var msg chatMessage
-        if err := json.Unmarshal([]byte(scanner.Text()), &msg); err == nil {
-          messages = append(messages, msg)
+      sid := entry.Name()
+      // 读 live.jsonl（消息历史）
+      liveFile := filepath.Join(sessDir, sid, "live.jsonl")
+      if strings.HasPrefix(filepath.Clean(liveFile), sessDir+string(os.PathSeparator)) {
+        f, err := os.Open(liveFile)
+        if err == nil {
+          scanner := bufio.NewScanner(f)
+          for scanner.Scan() {
+            var msg chatMessage
+            if json.Unmarshal([]byte(scanner.Text()), &msg) == nil {
+              messages = append(messages, msg)
+            }
+          }
+          f.Close()
         }
       }
-      f.Close()
+      // 读 events.jsonl（流事件，用于重建完整对话状态）
+      eventsFile := filepath.Join(sessDir, sid, "events.jsonl")
+      if strings.HasPrefix(filepath.Clean(eventsFile), sessDir+string(os.PathSeparator)) {
+        f, err := os.Open(eventsFile)
+        if err == nil {
+          scanner := bufio.NewScanner(f)
+          for scanner.Scan() {
+            var evt streamEvent
+            if json.Unmarshal([]byte(scanner.Text()), &evt) == nil {
+              events = append(events, evt)
+            }
+          }
+          f.Close()
+        }
+      }
       break // 只读第一个会话目录
     }
   }
   if messages == nil {
     messages = []chatMessage{}
   }
+  if events == nil {
+    events = []streamEvent{}
+  }
 
   writeJSON(c, http.StatusOK, struct {
     Success  bool          `json:"success"`
     Ready    bool          `json:"ready"`
     Messages []chatMessage `json:"messages"`
+    Events   []streamEvent `json:"events"`
   }{
     Success:  true,
     Ready:    true,
     Messages: messages,
+    Events:   events,
   })
 }
 

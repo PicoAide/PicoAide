@@ -16,6 +16,14 @@ import (
   "github.com/openai/openai-go/v3/shared"
 )
 
+// reasoningEvent 发出推理/思考内容增量事件
+func reasoningEvent(text string) StreamEvent {
+  return StreamEvent{
+    Type: "reasoning",
+    Data: mustJSON(text),
+  }
+}
+
 // ============================================================
 // LLM Provider 接口
 // ============================================================
@@ -295,14 +303,22 @@ func parseAnthropicSSE(ctx context.Context, r io.Reader, cb func(event StreamEve
 
     case "content_block_delta":
       var ev struct {
+        Index int `json:"index"`
         Delta struct {
           Type string `json:"type"`
           Text string `json:"text"`
         } `json:"delta"`
       }
       json.Unmarshal(raw, &ev)
-      if ev.Delta.Type == "text_delta" && ev.Delta.Text != "" {
-        cb(TextDelta(ev.Delta.Text))
+      switch ev.Delta.Type {
+      case "text_delta":
+        if ev.Delta.Text != "" {
+          cb(TextDelta(ev.Delta.Text))
+        }
+      case "thinking_delta":
+        if ev.Delta.Text != "" {
+          cb(reasoningEvent(ev.Delta.Text))
+        }
       }
 
     case "message_stop":
@@ -424,6 +440,22 @@ func (p *OpenAIProvider) StreamChat(ctx context.Context, req *ChatRequest, cb fu
         continue
       }
       choice := chunk.Choices[0]
+
+      // 推理/思考内容（OpenAI-compatible reasoning_content）
+      reasoningRaw := choice.RawJSON()
+      if reasoningRaw != "" {
+        var rcChoice struct {
+          Delta map[string]json.RawMessage `json:"delta"`
+        }
+        if json.Unmarshal([]byte(reasoningRaw), &rcChoice) == nil {
+          if rcData, ok := rcChoice.Delta["reasoning_content"]; ok && len(rcData) > 0 && !bytes.Equal(rcData, []byte("null")) && !bytes.Equal(rcData, []byte(`""`)) {
+            var rcStr string
+            if json.Unmarshal(rcData, &rcStr) == nil && rcStr != "" {
+              cb(reasoningEvent(rcStr))
+            }
+          }
+        }
+      }
 
       // 内容增量
       if choice.Delta.Content != "" {

@@ -143,9 +143,14 @@ func main() {
   summarizer := agent.NewLLMSummarizer(provider, cfg.Model.ModelID, cfg.Model.MaxTokens)
   engine.SetSummarizer(summarizer)
 
-  // 6a. 注册子代理工具
-  subAgentTool := &agent.SubAgentTool{Manager: engine.SubAgentManager()}
-  tools.Register(subAgentTool)
+  // 6a. 创建子代理管理器 + 注册子代理工具（spawn + collect 分离以实现并行）
+  subAgentMgr := agent.NewSubAgentManager(cfg, provider, tools)
+  engine.SetSubAgentManager(subAgentMgr)
+  tools.Register(&agent.SubAgentSpawnTool{Manager: subAgentMgr})
+  tools.Register(&agent.SubAgentCollectTool{Manager: subAgentMgr})
+
+  // 6ab. 注册 MCP 代理调用工具
+  tools.Register(&agent.QueryServerTool{Registry: tools})
 
   // 6b. 加载技能
   skills, err := agent.LoadSkills(cfg.Workspace)
@@ -222,6 +227,7 @@ func main() {
   }()
 
   var inputMsg *agent.Message
+  var lastProcessInterrupted bool
 msgLoop:
   for {
     select {
@@ -248,6 +254,16 @@ msgLoop:
       "content_length", len(inputMsg.Content),
       "content_preview", truncateString(inputMsg.Content, 100),
     )
+
+    // 如果上一个处理被中断（用户点击停止），插入上下文切换标记
+    if lastProcessInterrupted {
+      switchMsg := &agent.Message{
+        Role:    agent.RoleSystem,
+        Content: "用户已中止上一个任务。以下是一条全新的请求，与之前的对话无关，请忽略之前未完成的任务，专注于当前请求。",
+      }
+      store.AppendMessage(sessionKey, switchMsg)
+      lastProcessInterrupted = false
+    }
 
     // 保存用户消息
     store.AppendMessage(sessionKey, inputMsg)

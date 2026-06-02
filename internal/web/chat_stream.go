@@ -9,7 +9,9 @@ import (
   "fmt"
   "log/slog"
   "net/http"
+  "os"
   "path/filepath"
+  "strings"
   "sync"
   "time"
 
@@ -186,6 +188,7 @@ func (s *Server) startChatSandbox(username, message string, inputJSON []byte) *c
         run.append(streamEvent{Type: "error", Data: mustMarshal(err.Error())})
       }
       run.finish()
+      s.persistRunEvents(username, run)
       return
     }
     var eventCount int
@@ -195,12 +198,66 @@ func (s *Server) startChatSandbox(username, message string, inputJSON []byte) *c
     }
     slog.Debug("chat.sandbox_complete", "run_id", run.runID, "event_count", eventCount)
     run.finish()
+    s.persistRunEvents(username, run)
   }()
 
   return run
 }
 
 // ============================================================
+// persistRunEvents 在 run 结束后将事件持久化到 session 目录，供刷新后还原
+func (s *Server) persistRunEvents(username string, run *chatRun) {
+  sessDir := filepath.Join(config.WorkDir(), "users", username, "sessions")
+  entries, err := os.ReadDir(sessDir)
+  if err != nil {
+    return
+  }
+  if len(entries) == 0 {
+    return
+  }
+  eventsFile := filepath.Join(sessDir, entries[0].Name(), "events.jsonl")
+  if !strings.HasPrefix(filepath.Clean(eventsFile), sessDir+string(os.PathSeparator)) {
+    return
+  }
+  f, err := os.Create(eventsFile)
+  if err != nil {
+    return
+  }
+  defer f.Close()
+  run.mu.Lock()
+  defer run.mu.Unlock()
+  for _, evt := range run.events {
+    line, _ := json.Marshal(evt)
+    f.Write(line)
+    f.Write([]byte{'\n'})
+  }
+}
+
+// handleChatActive 返回当前是否有活跃会话
+func (s *Server) handleChatActive(c *gin.Context) {
+  username := s.requireRegularUser(c)
+  if username == "" {
+    return
+  }
+  runID := ""
+  if v, ok := userRun.Load(username); ok {
+    runID = v.(*chatRun).runID
+  } else {
+    activeRuns.Range(func(key, value interface{}) bool {
+      if value.(*chatRun).username == username {
+        runID = value.(*chatRun).runID
+        return false
+      }
+      return true
+    })
+  }
+  writeJSON(c, http.StatusOK, map[string]interface{}{
+    "success": true,
+    "active":  runID != "",
+    "run_id":  runID,
+  })
+}
+
 // POST /api/user/chat/send — 提交消息，立即返回 run_id
 // ============================================================
 
