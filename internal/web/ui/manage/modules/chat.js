@@ -303,7 +303,14 @@ async function loadChatHistory() {
     var loading = document.getElementById('chat-loading');
     if (loading) loading.remove();
     if (box.children.length > 0) return;
-    if (res.messages && res.messages.length > 0) {
+    if (res.events && res.events.length > 0) {
+      // 优先用 events 还原完整对话状态（含工具调用等）
+      box.innerHTML = '';
+      resetSSEState(box);
+      for (var evt of res.events) {
+        handleSSEEvent(evt);
+      }
+    } else if (res.messages && res.messages.length > 0) {
       box.innerHTML = '';
       for (var m of res.messages) {
         appendMsg(box, m.role === 'assistant' ? 'assistant' : 'user', m.content);
@@ -387,6 +394,17 @@ document.addEventListener('visibilitychange', function() {
 // 预加载 marked 库
 ensureMarked();
 
+async function checkActiveRun() {
+  try {
+    var res = await apiJSON('GET', '/api/user/chat/active');
+    if (res.active && res.run_id) {
+      localStorage.setItem(RUN_ID_KEY, res.run_id);
+      return res.run_id;
+    }
+  } catch(e) {}
+  return null;
+}
+
 function init() {
   // 计算面板高度撑满视口剩余空间
   var panel = document.getElementById('chat-panel');
@@ -408,12 +426,17 @@ function init() {
     window.addEventListener('resize', adjustHeight);
   }
 
-  var runId = localStorage.getItem(RUN_ID_KEY);
-  if (runId) {
-    tryReconnect(true); // force=true 绕过模块缓存的 currentRunId 守卫
-  } else {
-    loadChatHistory();
-  }
+  // 先检查服务器是否有活跃会话（跨刷新/SPA导航）
+  checkActiveRun().then(function(serverRunId) {
+    var localRunId = localStorage.getItem(RUN_ID_KEY);
+    var runId = serverRunId || localRunId;
+    if (runId) {
+      localStorage.setItem(RUN_ID_KEY, runId);
+      tryReconnect(true);
+    } else {
+      loadChatHistory();
+    }
+  });
 
   var form = document.getElementById('chat-form');
   var input = document.getElementById('chat-input');
