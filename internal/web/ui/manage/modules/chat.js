@@ -71,7 +71,7 @@ function getLastAssistantContent(box) {
 // SSE 事件处理 — 渲染到聊天框
 // ============================================================
 
-var sseState = { box: null, contentEl: null, fullText: '', statusEl: null, thinkingEl: null };
+var sseState = { box: null, contentEl: null, fullText: '', statusEl: null, thinkingEl: null, reasoningEl: null };
 
 function handleSSEEvent(parsed) {
   var s = sseState;
@@ -79,10 +79,32 @@ function handleSSEEvent(parsed) {
     var txt = safeParse(parsed.data);
     if (typeof txt !== 'string') txt = String(txt);
     appendMsg(s.box, 'user', txt);
+  } else if (parsed.type === 'reasoning') {
+    var rt = safeParse(parsed.data);
+    if (typeof rt !== 'string') rt = String(rt);
+    if (!s.reasoningEl) {
+      s.box.insertAdjacentHTML('beforeend',
+        '<div class="chat-msg msg-reasoning" style="background:#f8f9fa;border:1px solid #e8e8e8;border-radius:8px;padding:10px 14px;margin-bottom:8px;max-width:85%">' +
+        '<div class="chat-meta" style="font-size:12px;color:#999;margin-bottom:4px">🤔 思考中...</div>' +
+        '<div class="chat-reasoning-content" style="font-size:.88em;color:#666;line-height:1.5;white-space:pre-wrap;word-break:break-word"></div>' +
+        '</div>');
+      s.reasoningEl = s.box.querySelector('.chat-msg.msg-reasoning:last-child .chat-reasoning-content');
+    }
+    s.reasoningEl.textContent += rt;
+    s.box.scrollTop = s.box.scrollHeight;
   } else if (parsed.type === 'text_delta') {
     var txt = safeParse(parsed.data);
     if (typeof txt !== 'string') txt = String(txt);
     s.fullText += txt;
+    // 有 reasoning 时，第一条 text_delta 代表思考结束，隐藏 reasoning 块
+    if (s.reasoningEl) {
+      var reasoningMsg = s.reasoningEl.closest('.chat-msg.msg-reasoning');
+      if (reasoningMsg) {
+        var meta = reasoningMsg.querySelector('.chat-meta');
+        if (meta) meta.textContent = '🤔 思考完成';
+      }
+      s.reasoningEl = null;
+    }
     if (!s.contentEl) {
       if (s.thinkingEl) { s.thinkingEl.remove(); s.thinkingEl = null; }
       s.box.insertAdjacentHTML('beforeend',
@@ -150,6 +172,14 @@ function handleSSEEvent(parsed) {
     }
   } else if (parsed.type === 'finish') {
     if (s.statusEl) { s.statusEl.remove(); s.statusEl = null; }
+    if (s.reasoningEl) {
+      var reasoningMsg = s.reasoningEl.closest('.chat-msg.msg-reasoning');
+      if (reasoningMsg) {
+        var meta = reasoningMsg.querySelector('.chat-meta');
+        if (meta) meta.textContent = '🤔 思考完成';
+      }
+      s.reasoningEl = null;
+    }
     s.box.scrollTop = s.box.scrollHeight;
   } else if (parsed.type === 'error') {
     var errMsg = safeParse(parsed.data);
@@ -178,6 +208,7 @@ function resetSSEState(box) {
   sseState.fullText = '';
   sseState.statusEl = null;
   sseState.thinkingEl = null;
+  sseState.reasoningEl = null;
   // 重置上下文进度条
   var bar = document.getElementById('chat-context-bar');
   var fill = document.getElementById('chat-context-fill');

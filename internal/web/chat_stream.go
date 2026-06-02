@@ -242,6 +242,14 @@ func (s *Server) handleChatActive(c *gin.Context) {
   runID := ""
   if v, ok := userRun.Load(username); ok {
     runID = v.(*chatRun).runID
+  } else {
+    activeRuns.Range(func(key, value interface{}) bool {
+      if value.(*chatRun).username == username {
+        runID = value.(*chatRun).runID
+        return false
+      }
+      return true
+    })
   }
   writeJSON(c, http.StatusOK, map[string]interface{}{
     "success": true,
